@@ -5,12 +5,12 @@ A small "skills hub" that lets you pull skills from upstream repos (in `sources/
 - **Claude Code** via `~/.claude/skills/`
 - **Codex** via `~/.codex/skills/`
 
-It does this by **symlinking** each upstream skill directory (a folder containing `SKILL.md`) into those locations.
+It does this by creating a real directory per skill, **copying `SKILL.md`**, and symlinking the remaining contents (so tools that ignore symlinked dirs still discover `SKILL.md`).
 
 ## Repo layout
 
 - `sources/` - upstream skill repos (submodules or plain clones)
-- `scripts/skills-link.py` - installer/uninstaller (symlink manager)
+- `scripts/skills-link.py` - installer/uninstaller (link manager)
 
 ## Quick start
 
@@ -26,8 +26,8 @@ git submodule update --init --recursive
 
 That will create/refresh:
 
-* `~/.claude/skills/*`  (symlinks)
-* `~/.codex/skills/*`   (symlinks)
+* `~/.claude/skills/*`  (directories with a real `SKILL.md` plus symlinks)
+* `~/.codex/skills/*`   (directories with a real `SKILL.md` plus symlinks)
 
 ## Update skills
 
@@ -54,8 +54,8 @@ This installs into:
 
 ## Uninstall
 
-Removes only the **symlinks created by this hub** from the target directories.
-It will **not** delete any real folders/files (so your own custom skills remain).
+Removes only **hub-managed entries** from the target directories.
+It will **not** delete any custom folders/files (so your own custom skills remain).
 
 ```bash
 # HOME uninstall (default)
@@ -76,9 +76,9 @@ git submodule update --init --recursive
 ## Notes / gotchas
 
 * Skill link names are derived from the path under `sources/`; if sanitization collides, the script adds a short hash suffix.
-* The link script writes `.skills-hub.json` in each target dir to track hub-managed links and avoid touching non-hub symlinks.
+* The link script writes `.skills-hub.json` in each target dir to track hub-managed entries and avoid touching non-hub skills.
 * The link script dedupes by exact skill content hash and by `name:` in `SKILL.md`, keeping the newest copy (git commit time when available, otherwise file mtime). It prints any skipped duplicates and requires `python3`.
-* If you move `~/agent-skills`, re-run the script to refresh symlinks.
+* If you move `~/agent-skills`, re-run the script to refresh links.
 
 ## Sources (submodules)
 

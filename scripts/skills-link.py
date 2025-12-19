@@ -3,11 +3,14 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
 MANIFEST_FILENAME = ".skills-hub.json"
 MANIFEST_VERSION = 1
+SENTINEL_FILENAME = ".skills-hub-target"
+MANAGED_FILES = {SENTINEL_FILENAME, "SKILL.md"}
 IGNORED_DIR_NAMES = {
     ".git",
     "__pycache__",
@@ -37,8 +40,8 @@ Default (no flags):
     ./.codex/skills/
 
 --uninstall:
-  Remove ONLY symlinks in the target skills dirs tracked by this hub.
-  Leaves non-symlink entries intact (preserves your own custom skills).
+  Remove ONLY hub-managed entries in the target skills dirs.
+  Leaves non-hub entries intact (preserves your own custom skills).
 """
 
 
@@ -175,6 +178,33 @@ def remove_manifest(target_dir):
         print(f"warning: failed to remove manifest: {path}", file=sys.stderr)
 
 
+def sentinel_path(target_dir):
+    return os.path.join(target_dir, SENTINEL_FILENAME)
+
+
+def read_sentinel(target_dir):
+    path = sentinel_path(target_dir)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        print(f"warning: unreadable sentinel: {path}", file=sys.stderr)
+        return None
+    return value or None
+
+
+def write_sentinel(target_dir, target):
+    path = sentinel_path(target_dir)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(target)
+            handle.write("\n")
+    except OSError:
+        print(f"warning: failed to write sentinel: {path}", file=sys.stderr)
+
+
 def resolve_link_target(path):
     try:
         link_target = os.readlink(path)
@@ -199,6 +229,38 @@ def is_hub_link(resolved_path, sources_dirs, manifest_target=None):
                 return True
         except OSError:
             pass
+    return False
+
+
+def is_hub_dir(path, sources_dirs, manifest_target=None):
+    if not os.path.isdir(path):
+        return False
+    sentinel_target = read_sentinel(path)
+    if sentinel_target:
+        resolved = os.path.realpath(sentinel_target)
+        if manifest_target:
+            try:
+                if os.path.realpath(manifest_target) == resolved:
+                    return True
+            except OSError:
+                return False
+        for sources_dir in sources_dirs:
+            if sources_dir and is_under_sources(resolved, sources_dir):
+                return True
+        return False
+    skill_target = resolve_link_target(os.path.join(path, "SKILL.md"))
+    if not skill_target:
+        return False
+    if manifest_target:
+        try:
+            manifest_real = os.path.realpath(manifest_target)
+        except OSError:
+            manifest_real = None
+        if manifest_real and is_under_sources(skill_target, manifest_real):
+            return True
+    for sources_dir in sources_dirs:
+        if sources_dir and is_under_sources(skill_target, sources_dir):
+            return True
     return False
 
 
@@ -547,7 +609,117 @@ def is_under_sources(resolved_path, sources_dir):
         return False
 
 
-def remove_hub_symlinks_in_dir(target_dir, sources_dir):
+def create_link_farm(dest_dir, source_dir):
+    os.makedirs(dest_dir, exist_ok=True)
+    write_sentinel(dest_dir, os.path.realpath(source_dir))
+    skill_linked = False
+    for entry in sorted(os.listdir(source_dir)):
+        src = os.path.join(source_dir, entry)
+        if os.path.isdir(src):
+            if should_skip_dir(entry):
+                continue
+        elif os.path.isfile(src):
+            if should_skip_file(entry):
+                continue
+        else:
+            continue
+        if entry == SENTINEL_FILENAME:
+            continue
+        if entry == "SKILL.md":
+            dest = os.path.join(dest_dir, entry)
+            if os.path.lexists(dest):
+                print(f"skip (exists in hub dir): {dest}", file=sys.stderr)
+                skill_linked = True
+                continue
+            try:
+                shutil.copy2(src, dest)
+            except OSError as exc:
+                print(
+                    f"warning: failed to copy SKILL.md: {dest} ({exc})",
+                    file=sys.stderr,
+                )
+                continue
+            skill_linked = True
+            continue
+        dest = os.path.join(dest_dir, entry)
+        if os.path.lexists(dest):
+            print(f"skip (exists in hub dir): {dest}", file=sys.stderr)
+            continue
+        try:
+            os.symlink(os.path.realpath(src), dest)
+        except OSError as exc:
+            print(
+                f"warning: failed to create symlink: {dest} ({exc})",
+                file=sys.stderr,
+            )
+            continue
+    return skill_linked
+
+
+def remove_link_farm(path, sources_dirs, manifest_target=None, remove_dirty=False):
+    if not is_hub_dir(path, sources_dirs, manifest_target):
+        return False
+
+    entries = []
+    non_symlink = []
+    for entry in os.listdir(path):
+        entry_path = os.path.join(path, entry)
+        entries.append((entry, entry_path))
+        if entry in MANAGED_FILES:
+            continue
+        if os.path.islink(entry_path):
+            continue
+        non_symlink.append(entry)
+
+    if non_symlink and not remove_dirty:
+        print(
+            f"skip (hub dir has non-symlink entries): {path}",
+            file=sys.stderr,
+        )
+        return False
+
+    for entry, entry_path in entries:
+        if entry == SENTINEL_FILENAME:
+            try:
+                os.unlink(entry_path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                print(
+                    f"warning: failed to remove sentinel: {entry_path}",
+                    file=sys.stderr,
+                )
+            continue
+        if entry == "SKILL.md" and os.path.isfile(entry_path):
+            try:
+                os.unlink(entry_path)
+            except OSError:
+                print(
+                    f"warning: failed to remove SKILL.md: {entry_path}",
+                    file=sys.stderr,
+                )
+            continue
+        if os.path.islink(entry_path):
+            try:
+                os.unlink(entry_path)
+            except OSError:
+                print(
+                    f"warning: failed to remove symlink: {entry_path}",
+                    file=sys.stderr,
+                )
+
+    if non_symlink:
+        return False
+
+    try:
+        os.rmdir(path)
+    except OSError:
+        print(f"warning: failed to remove hub dir: {path}", file=sys.stderr)
+        return False
+    return True
+
+
+def remove_hub_entries_in_dir(target_dir, sources_dir, remove_dirty=False):
     os.makedirs(target_dir, exist_ok=True)
 
     manifest, manifest_exists = read_manifest(target_dir)
@@ -560,23 +732,30 @@ def remove_hub_symlinks_in_dir(target_dir, sources_dir):
     if manifest_exists and manifest_targets:
         for name, target in manifest_targets.items():
             path = os.path.join(target_dir, name)
-            if not os.path.islink(path):
-                continue
-            resolved = resolve_link_target(path)
-            if resolved is None:
-                print(
-                    f"warning: skipping unreadable symlink: {path}",
-                    file=sys.stderr,
-                )
-                continue
-            if is_hub_link(resolved, sources_dirs, target):
-                try:
-                    os.unlink(path)
-                except OSError:
+            if os.path.islink(path):
+                resolved = resolve_link_target(path)
+                if resolved is None:
                     print(
-                        f"warning: failed to remove symlink: {path}",
+                        f"warning: skipping unreadable symlink: {path}",
                         file=sys.stderr,
                     )
+                    continue
+                if is_hub_link(resolved, sources_dirs, target):
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        print(
+                            f"warning: failed to remove symlink: {path}",
+                            file=sys.stderr,
+                        )
+                continue
+            if os.path.isdir(path):
+                remove_link_farm(
+                    path,
+                    sources_dirs,
+                    manifest_target=target,
+                    remove_dirty=remove_dirty,
+                )
         return
     if manifest_exists and not manifest_targets:
         print(
@@ -586,20 +765,22 @@ def remove_hub_symlinks_in_dir(target_dir, sources_dir):
 
     for entry in os.listdir(target_dir):
         path = os.path.join(target_dir, entry)
-        if not os.path.islink(path):
+        if os.path.islink(path):
+            resolved = resolve_link_target(path)
+            if resolved is None:
+                print(
+                    f"warning: skipping unreadable symlink: {path}",
+                    file=sys.stderr,
+                )
+                continue
+            if is_hub_link(resolved, sources_dirs):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    print(f"warning: failed to remove symlink: {path}", file=sys.stderr)
             continue
-        resolved = resolve_link_target(path)
-        if resolved is None:
-            print(
-                f"warning: skipping unreadable symlink: {path}",
-                file=sys.stderr,
-            )
-            continue
-        if is_hub_link(resolved, sources_dirs):
-            try:
-                os.unlink(path)
-            except OSError:
-                print(f"warning: failed to remove symlink: {path}", file=sys.stderr)
+        if os.path.isdir(path):
+            remove_link_farm(path, sources_dirs, remove_dirty=remove_dirty)
 
 
 def install_links_into_dir(target_dir, sources_dir, link_entries, manifest, manifest_exists):
@@ -616,10 +797,6 @@ def install_links_into_dir(target_dir, sources_dir, link_entries, manifest, mani
     manifest_active = manifest_exists
     for entry in link_entries:
         dest = os.path.join(target_dir, entry["name"])
-
-        if os.path.lexists(dest) and not os.path.islink(dest):
-            print(f"skip (exists, not symlink): {dest}", file=sys.stderr)
-            continue
 
         if os.path.islink(dest):
             resolved = resolve_link_target(dest)
@@ -646,13 +823,44 @@ def install_links_into_dir(target_dir, sources_dir, link_entries, manifest, mani
             except OSError:
                 print(f"warning: failed to remove symlink: {dest}", file=sys.stderr)
                 continue
+        elif os.path.isdir(dest):
+            manifest_target = manifest_targets.get(entry["name"]) if manifest_active else None
+            if manifest_active and not manifest_target:
+                print(f"skip (existing dir not managed): {dest}", file=sys.stderr)
+                continue
+            if not is_hub_dir(dest, sources_dirs, manifest_target):
+                print(f"skip (existing dir not managed): {dest}", file=sys.stderr)
+                continue
+            if not remove_link_farm(
+                dest,
+                sources_dirs,
+                manifest_target=manifest_target,
+                remove_dirty=False,
+            ):
+                print(
+                    f"skip (hub dir has non-symlink entries): {dest}",
+                    file=sys.stderr,
+                )
+                continue
+        elif os.path.lexists(dest):
+            print(f"skip (exists, not symlink or dir): {dest}", file=sys.stderr)
+            continue
 
         try:
-            os.symlink(os.path.realpath(entry["dir"]), dest)
+            skill_linked = create_link_farm(dest, entry["dir"])
         except OSError as exc:
             print(
-                f"warning: failed to create symlink: {dest} ({exc})",
+                f"warning: failed to create hub dir: {dest} ({exc})",
                 file=sys.stderr,
+            )
+            continue
+        if not skill_linked:
+            print(f"warning: missing SKILL.md link in: {dest}", file=sys.stderr)
+            remove_link_farm(
+                dest,
+                sources_dirs,
+                manifest_target=entry["dir"],
+                remove_dirty=True,
             )
             continue
         count += 1
@@ -685,11 +893,11 @@ def main():
     codex_dir = os.path.join(base_dir, ".codex", "skills")
 
     if uninstall:
-        remove_hub_symlinks_in_dir(claude_dir, sources_dir_real)
-        remove_hub_symlinks_in_dir(codex_dir, sources_dir_real)
+        remove_hub_entries_in_dir(claude_dir, sources_dir_real, remove_dirty=True)
+        remove_hub_entries_in_dir(codex_dir, sources_dir_real, remove_dirty=True)
         remove_manifest(claude_dir)
         remove_manifest(codex_dir)
-        print("Uninstalled hub symlinks from:")
+        print("Uninstalled hub entries from:")
         print(f"  {claude_dir}")
         print(f"  {codex_dir}")
         return 0
@@ -707,8 +915,8 @@ def main():
         print(f"No SKILL.md found under: {sources_dir}", file=sys.stderr)
         return 1
 
-    remove_hub_symlinks_in_dir(claude_dir, sources_dir_real)
-    remove_hub_symlinks_in_dir(codex_dir, sources_dir_real)
+    remove_hub_entries_in_dir(claude_dir, sources_dir_real, remove_dirty=False)
+    remove_hub_entries_in_dir(codex_dir, sources_dir_real, remove_dirty=False)
 
     claude_manifest, claude_manifest_exists = read_manifest(claude_dir)
     codex_manifest, codex_manifest_exists = read_manifest(codex_dir)
@@ -731,7 +939,7 @@ def main():
     write_manifest(claude_dir, build_manifest(sources_dir_real, claude_entries))
     write_manifest(codex_dir, build_manifest(sources_dir_real, codex_entries))
 
-    print("Installed symlinks:")
+    print("Installed hub entries:")
     print(f"  Claude: {claude_dir} ({c1})")
     print(f"  Codex:  {codex_dir} ({c2})")
     return 0
