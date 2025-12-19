@@ -1,3 +1,21 @@
 [submodule "sources/anthropics-skills"]
 	path = sources/anthropics-skills
 	url = https://github.com/anthropics/skills
+[submodule "sources/skillcreatorai-ai-agent-skills"]
+	path = sources/skillcreatorai-ai-agent-skills
+	url = https://github.com/skillcreatorai/Ai-Agent-Skills.git
+[submodule "sources/composio-awesome-claude-skills"]
+	path = sources/composio-awesome-claude-skills
+	url = https://github.com/ComposioHQ/awesome-claude-skills.git
+[submodule "sources/rknall-claude-skills"]
+	path = sources/rknall-claude-skills
+	url = https://github.com/rknall/claude-skills.git
+[submodule "sources/lmorchard-agent-skills"]
+	path = sources/lmorchard-agent-skills
+	url = https://github.com/lmorchard/lmorchard-agent-skills.git
+[submodule "sources/kurrent-coding-agent-skills"]
+	path = sources/kurrent-coding-agent-skills
+	url = https://github.com/kurrent-io/coding-agent-skills.git
+[submodule "sources/feiskyer-codex-settings"]
+	path = sources/feiskyer-codex-settings
+	url = https://github.com/feiskyer/codex-settings.git
