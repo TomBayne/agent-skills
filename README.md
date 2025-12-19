@@ -10,7 +10,7 @@ It does this by **symlinking** each upstream skill directory (a folder containin
 ## Repo layout
 
 - `sources/` - upstream skill repos (submodules or plain clones)
-- `scripts/skills-link.sh` - installer/uninstaller (symlink manager)
+- `scripts/skills-link.py` - installer/uninstaller (symlink manager)
 
 ## Quick start
 
@@ -21,7 +21,7 @@ cd ~/agent-skills
 git submodule update --init --recursive
 
 # Install into HOME (default)
-./scripts/skills-link.sh
+./scripts/skills-link.py
 ```
 
 That will create/refresh:
@@ -36,7 +36,7 @@ Pull upstream changes, then re-link:
 ```bash
 git submodule update --remote --merge
 
-./scripts/skills-link.sh
+./scripts/skills-link.py
 ```
 
 ## Install to the current directory (repo-local)
@@ -44,7 +44,7 @@ git submodule update --remote --merge
 If you want project-scoped skills instead of HOME:
 
 ```bash
-./scripts/skills-link.sh --here
+./scripts/skills-link.py --here
 ```
 
 This installs into:
@@ -59,10 +59,10 @@ It will **not** delete any real folders/files (so your own custom skills remain)
 
 ```bash
 # HOME uninstall (default)
-./scripts/skills-link.sh --uninstall
+./scripts/skills-link.py --uninstall
 
 # Repo-local uninstall
-./scripts/skills-link.sh --here --uninstall
+./scripts/skills-link.py --here --uninstall
 ```
 
 ## Adding another upstream repo
@@ -70,13 +70,14 @@ It will **not** delete any real folders/files (so your own custom skills remain)
 ```bash
 git submodule add <UPSTREAM_REPO_URL> sources/<name>
 git submodule update --init --recursive
-./scripts/skills-link.sh
+./scripts/skills-link.py
 ```
 
 ## Notes / gotchas
 
-* Skill link names are derived from the path under `sources/` (so they’re unique hopefully).
-* If two upstream repos ship skills with the same *internal* `name:` in `SKILL.md`, the tool that loads them might behave weirdly depending on how it resolves duplicates. TODO: Test this, and detect if it happens.
+* Skill link names are derived from the path under `sources/`; if sanitization collides, the script adds a short hash suffix.
+* The link script writes `.skills-hub.json` in each target dir to track hub-managed links and avoid touching non-hub symlinks.
+* The link script dedupes by exact skill content hash and by `name:` in `SKILL.md`, keeping the newest copy (git commit time when available, otherwise file mtime). It prints any skipped duplicates and requires `python3`.
 * If you move `~/agent-skills`, re-run the script to refresh symlinks.
 
 ## Sources (submodules)
@@ -84,5 +85,11 @@ git submodule update --init --recursive
 If you’re using git submodules, this is the list we currently track:
 
 * `sources/anthropics-skills` — [https://github.com/anthropics/skills](https://github.com/anthropics/skills)
+* `sources/skillcreatorai-ai-agent-skills` — [https://github.com/skillcreatorai/Ai-Agent-Skills.git](https://github.com/skillcreatorai/Ai-Agent-Skills.git)
+* `sources/composio-awesome-claude-skills` — [https://github.com/ComposioHQ/awesome-claude-skills.git](https://github.com/ComposioHQ/awesome-claude-skills.git)
+* `sources/rknall-claude-skills` — [https://github.com/rknall/claude-skills.git](https://github.com/rknall/claude-skills.git)
+* `sources/lmorchard-agent-skills` — [https://github.com/lmorchard/lmorchard-agent-skills.git](https://github.com/lmorchard/lmorchard-agent-skills.git)
+* `sources/kurrent-coding-agent-skills` — [https://github.com/kurrent-io/coding-agent-skills.git](https://github.com/kurrent-io/coding-agent-skills.git)
+* `sources/feiskyer-codex-settings` — [https://github.com/feiskyer/codex-settings.git](https://github.com/feiskyer/codex-settings.git)
 
 (If you add more, update this list)
